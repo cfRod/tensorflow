@@ -355,19 +355,23 @@ void InitCPUIDInfo() {
 class CPUIDInfo;
 void InitCPUIDInfo();
 
-CPUIDInfo* cpuid = nullptr;
+CPUIDInfo *cpuid = nullptr;
 
-// Structure for basic CPUID info.
+// Structure for basic CPUID info
 class CPUIDInfo {
  public:
-  CPUIDInfo() : implementer_(0), variant_(0), cpunum_(0) {}
+  CPUIDInfo()
+      : implementer_(0),
+        variant_(0),
+        cpunum_(0),
+        is_arm_neoverse_v1_(0),
+        is_arm_neoverse_n1_(0) {}
 
   static void Initialize() {
     // Initialize cpuid struct.
     if (cpuid != nullptr) {
       return;
     }
-
     cpuid = new CPUIDInfo;
 
     if (!(getauxval(AT_HWCAP) & HWCAP_CPUID)) {
@@ -409,10 +413,20 @@ class CPUIDInfo {
       if (bool(getline(midr_el1_file, line))) {
         uint32 midr_el1 = std::stoul(line, nullptr, 16);
 
-        // Unpack variant and CPU ID.
+        // Unpack variant and CPU ID
         cpuid->implementer_ = (midr_el1 >> 24) & 0xFF;
         cpuid->variant_ = (midr_el1 >> 20) & 0xF;
         cpuid->cpunum_ = (midr_el1 >> 4) & 0xFFF;
+        if (cpuid->implementer_ == 0x41) {
+          switch (cpuid->cpunum_) {
+            case 0xd40:  // ARM NEOVERSE V1
+              cpuid->is_arm_neoverse_v1_ = 1;
+            case 0xd0c:  // ARM NEOVERSE N1
+              cpuid->is_arm_neoverse_n1_ = 1;
+            default:
+              break;
+          }
+        }
       }
     }
   }
@@ -420,10 +434,22 @@ class CPUIDInfo {
   int implementer() const { return implementer_; }
   int cpunum() const { return cpunum_; }
 
- private:
-  int implementer_;
-  int variant_;
-  int cpunum_;
+  static bool TestAarch64CPU(Aarch64_CPU cpu) {
+    InitCPUIDInfo();
+    // clang-format off
+    switch (cpu) {
+      case ARM_NEOVERSE_V1: return cpuid->is_arm_neoverse_v1_;
+      default:
+        return 0;
+        break;
+    }
+  }
+  private:
+    int implementer_;
+    int variant_;
+    int cpunum_;
+    int is_arm_neoverse_v1_; //ARM NEOVERSE V1
+    int is_arm_neoverse_n1_; //ARM NEOVERSE N1
 };
 
 absl::once_flag cpuid_once_flag;
@@ -432,7 +458,7 @@ void InitCPUIDInfo() {
   absl::call_once(cpuid_once_flag, CPUIDInfo::Initialize);
 }
 
-#endif
+#endif // PLATFORM_IS_ARM64
 }  // namespace
 
 bool TestCPUFeature(CPUFeature feature) {
@@ -440,6 +466,14 @@ bool TestCPUFeature(CPUFeature feature) {
   return CPUIDInfo::TestFeature(feature);
 #else
   return false;
+#endif
+}
+
+bool TestAarch64CPU(Aarch64_CPU cpu){
+#ifdef PLATFORM_IS_ARM64
+    return CPUIDInfo::TestAarch64CPU(cpu);
+#else
+    return false;
 #endif
 }
 
